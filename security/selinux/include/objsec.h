@@ -38,7 +38,7 @@ struct task_security_struct {
 #ifdef CONFIG_FASTUH_KDP
 	void *bp_cred;
 #endif
-};
+} __randomize_layout;
 
 enum label_initialized {
 	LABEL_INVALID,		/* invalid or not initialized */
