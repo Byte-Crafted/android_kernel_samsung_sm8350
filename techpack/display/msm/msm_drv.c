@@ -85,6 +85,28 @@
 
 static DEFINE_MUTEX(msm_release_lock);
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+static BLOCKING_NOTIFIER_HEAD(msm_drm_notifier_list);
+
+int msm_drm_register_notifier_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_register(&msm_drm_notifier_list, nb);
+}
+EXPORT_SYMBOL(msm_drm_register_notifier_client);
+
+int msm_drm_unregister_notifier_client(struct notifier_block *nb)
+{
+	return blocking_notifier_chain_unregister(&msm_drm_notifier_list, nb);
+}
+EXPORT_SYMBOL(msm_drm_unregister_notifier_client);
+
+int __msm_drm_notifier_call_chain(unsigned long event, void *data)
+{
+	return blocking_notifier_call_chain(&msm_drm_notifier_list,
+					event, data);
+}
+#endif
+
 static void msm_fb_output_poll_changed(struct drm_device *dev)
 {
 	struct msm_drm_private *priv = NULL;
@@ -616,10 +638,19 @@ static int msm_drm_display_thread_create(struct sched_param param,
 		priv->disp_thread[i].crtc_id = priv->crtcs[i]->base.id;
 		kthread_init_worker(&priv->disp_thread[i].worker);
 		priv->disp_thread[i].dev = ddev;
+#if IS_ENABLED(CONFIG_QGKI)
 		priv->disp_thread[i].thread =
 			kthread_run(kthread_worker_fn,
 				&priv->disp_thread[i].worker,
 				"crtc_commit:%d", priv->disp_thread[i].crtc_id);
+#else
+		priv->disp_thread[i].thread =
+			kthread_create(kthread_worker_fn,
+				&priv->disp_thread[i].worker,
+				"crtc_commit:%d", priv->disp_thread[i].crtc_id);
+		kthread_bind(priv->disp_thread[i].thread, 1);
+		wake_up_process(priv->disp_thread[i].thread);
+#endif
 		ret = sched_setscheduler(priv->disp_thread[i].thread,
 							SCHED_FIFO, &param);
 		if (ret)
@@ -635,10 +666,19 @@ static int msm_drm_display_thread_create(struct sched_param param,
 		priv->event_thread[i].crtc_id = priv->crtcs[i]->base.id;
 		kthread_init_worker(&priv->event_thread[i].worker);
 		priv->event_thread[i].dev = ddev;
+#if IS_ENABLED(CONFIG_QGKI)		
 		priv->event_thread[i].thread =
 			kthread_run(kthread_worker_fn,
 				&priv->event_thread[i].worker,
 				"crtc_event:%d", priv->event_thread[i].crtc_id);
+#else
+		priv->event_thread[i].thread =
+			kthread_create(kthread_worker_fn,
+				&priv->event_thread[i].worker,
+				"crtc_event:%d", priv->event_thread[i].crtc_id);
+		kthread_bind(priv->event_thread[i].thread, 2);
+		wake_up_process(priv->event_thread[i].thread);
+#endif	
 		/**
 		 * event thread should also run at same priority as disp_thread
 		 * because it is handling frame_done events. A lower priority
@@ -954,9 +994,33 @@ mdss_init_fail:
 	return ret;
 }
 
+void msm_atomic_flush_display_threads(struct msm_drm_private *priv)
+{
+	int i;
+
+	if (!priv) {
+		SDE_ERROR("invalid private data\n");
+		return;
+	}
+
+	for (i = 0; i < priv->num_crtcs; i++) {
+		if (priv->disp_thread[i].thread)
+			kthread_flush_worker(&priv->disp_thread[i].worker);
+		if (priv->event_thread[i].thread)
+			kthread_flush_worker(&priv->event_thread[i].worker);
+	}
+
+	kthread_flush_worker(&priv->pp_event_worker);
+}
+
 /*
  * DRM operations:
  */
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+struct msm_file_private *msm_ioctl_power_ctrl_ctx = NULL;
+DEFINE_MUTEX(msm_ioctl_power_ctrl_ctx_lock);
+#endif
 
 static int context_init(struct drm_device *dev, struct drm_file *file)
 {
@@ -989,6 +1053,13 @@ static int msm_open(struct drm_device *dev, struct drm_file *file)
 
 static void context_close(struct msm_file_private *ctx)
 {
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	mutex_lock(&msm_ioctl_power_ctrl_ctx_lock);
+	if (msm_ioctl_power_ctrl_ctx == ctx)
+		msm_ioctl_power_ctrl_ctx = NULL;
+	mutex_unlock(&msm_ioctl_power_ctrl_ctx_lock);
+#endif
+
 	kfree(ctx);
 }
 
@@ -1042,8 +1113,17 @@ static void msm_lastclose(struct drm_device *dev)
 	 * commit then ignore the last close call
 	 */
 	if (kms->funcs && kms->funcs->check_for_splash
-		&& kms->funcs->check_for_splash(kms, NULL))
-		return;
+		&& kms->funcs->check_for_splash(kms, NULL)) {
+		msm_wait_event_timeout(priv->pending_crtcs_event, !priv->pending_crtcs,
+			LASTCLOSE_TIMEOUT_MS, rc);
+		if (!rc)
+			DRM_INFO("wait for crtc mask 0x%x failed, commit anyway...\n",
+				priv->pending_crtcs);
+
+		rc = kms->funcs->trigger_null_flush(kms);
+		if (rc)
+			return;
+	}
 
 	/*
 	 * clean up vblank disable immediately as this is the last close.
@@ -1065,6 +1145,8 @@ static void msm_lastclose(struct drm_device *dev)
 	if (!rc)
 		DRM_INFO("wait for crtc mask 0x%x failed, commit anyway...\n",
 				priv->pending_crtcs);
+
+	msm_atomic_flush_display_threads(priv);
 
 	if (priv->fbdev) {
 		rc = drm_fb_helper_restore_fbdev_mode_unlocked(priv->fbdev);
@@ -1543,8 +1625,15 @@ static int msm_release(struct inode *inode, struct file *filp)
 	 * refcount > 1. This operation is not triggered from upstream
 	 * drm as msm_driver does not support DRIVER_LEGACY feature.
 	 */
-	if (drm_is_current_master(file_priv))
+	if (drm_is_current_master(file_priv)) {
+		msm_wait_event_timeout(priv->pending_crtcs_event, !priv->pending_crtcs,
+			LASTCLOSE_TIMEOUT_MS, ret);
+		if (!ret)
+			DRM_INFO("wait for crtc mask 0x%x failed, commit anyway...\n",
+				priv->pending_crtcs);
+
 		msm_preclose(dev, file_priv);
+	}
 
 	ret = drm_release(inode, filp);
 	filp->private_data = NULL;
@@ -1625,6 +1714,12 @@ int msm_ioctl_power_ctrl(struct drm_device *dev, void *data,
 	}
 
 	priv = dev->dev_private;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	mutex_lock(&msm_ioctl_power_ctrl_ctx_lock);
+	msm_ioctl_power_ctrl_ctx = ctx;
+	mutex_unlock(&msm_ioctl_power_ctrl_ctx_lock);
+#endif
 
 	mutex_lock(&ctx->power_lock);
 
@@ -1975,6 +2070,12 @@ static int add_display_components(struct device *dev,
 			node = of_parse_phandle(np, "connectors", i);
 			if (!node)
 				break;
+#ifndef CONFIG_SEC_DISPLAYPORT
+			if (!strncmp(node->name, "qcom,dp_display", 15)) {
+				pr_info("[drm-dp] disabled displayport!\n");
+				continue;
+			}
+#endif
 
 			component_match_add(dev, matchptr, compare_of, node);
 		}
@@ -2263,6 +2364,11 @@ static void __exit msm_drm_unregister(void)
 module_init(msm_drm_register);
 module_exit(msm_drm_unregister);
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#if defined(CONFIG_REGULATOR_S2DOS05)
+MODULE_SOFTDEP("pre: s2dos05_regulator");
+#endif
+#endif
 MODULE_AUTHOR("Rob Clark <robdclark@gmail.com");
 MODULE_DESCRIPTION("MSM DRM Driver");
 MODULE_LICENSE("GPL");

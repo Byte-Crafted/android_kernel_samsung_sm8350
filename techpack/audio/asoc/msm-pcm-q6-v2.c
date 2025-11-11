@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 /*
 * Add support for 24 and 32bit format for ASM loopback and playback session.
@@ -42,6 +42,7 @@
 #include "msm-pcm-q6-v2.h"
 #include "msm-pcm-routing-v2.h"
 #include "msm-qti-pp-config.h"
+#include <soc/qcom/subsystem_restart.h>
 
 #define DRV_NAME "msm-pcm-q6-v2"
 #define TIMEOUT_MS	1000
@@ -135,6 +136,43 @@ static struct snd_pcm_hw_constraint_list constraints_sample_rates = {
 static struct asm_softvolume_params soft_params = {0,0,0};
 
 struct msm_pcm_channel_map *chmap_pspd[MSM_FRONTEND_DAI_MM_SIZE][2];
+
+#define RETRY_MAX 5
+
+enum direction {
+	ASM_OPEN_WRITE,
+	ASM_OPEN_READ,
+	ASM_OPEN_MAX,
+};
+
+static int asm_fail[ASM_OPEN_MAX];
+
+static void msm_pcm_do_recovery(enum direction id)
+{
+	pr_info("%s: id(%d), write_fail(%d), read_fail(%d)\n",
+		__func__, id, asm_fail[ASM_OPEN_WRITE], asm_fail[ASM_OPEN_READ]);
+
+#ifdef CONFIG_SEC_SND_DEBUG
+	panic("q6asm open %s failed", id == 0 ? "write" : "read");
+#endif
+
+	if (++asm_fail[id] > RETRY_MAX) {
+		subsys_restart_adsp();
+		asm_fail[ASM_OPEN_WRITE] = asm_fail[ASM_OPEN_READ] = 0;
+	}
+}
+
+static void msm_pcm_reset_asm_fail(enum direction id)
+{
+	if ((asm_fail[ASM_OPEN_WRITE] == 0) &&
+		(asm_fail[ASM_OPEN_READ] == 0))
+		return;
+
+	pr_info("%s: id(%d), write_fail(%d), read_fail(%d)\n",
+		__func__, id, asm_fail[ASM_OPEN_WRITE], asm_fail[ASM_OPEN_READ]);
+
+	asm_fail[id] = 0;
+}
 
 static void msm_pcm_route_event_handler(enum msm_pcm_routing_event event,
 					void *priv_data)
@@ -665,6 +703,7 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 			__func__, ret);
 			q6asm_audio_client_free(prtd->audio_client);
 			prtd->audio_client = NULL;
+			msm_pcm_do_recovery(ASM_OPEN_WRITE);
 			return -ENOMEM;
 		}
 
@@ -756,6 +795,7 @@ static int msm_pcm_playback_prepare(struct snd_pcm_substream *substream)
 	prtd->enabled = 1;
 	prtd->cmd_pending = 0;
 	prtd->cmd_interrupt = 0;
+	msm_pcm_reset_asm_fail(ASM_OPEN_WRITE);
 
 	return 0;
 }
@@ -831,6 +871,7 @@ static int msm_pcm_capture_prepare(struct snd_pcm_substream *substream)
 			pr_err("%s: q6asm_open_read failed\n", __func__);
 			q6asm_audio_client_free(prtd->audio_client);
 			prtd->audio_client = NULL;
+			msm_pcm_do_recovery(ASM_OPEN_READ);
 			return -ENOMEM;
 		}
 
@@ -921,6 +962,7 @@ static int msm_pcm_capture_prepare(struct snd_pcm_substream *substream)
 		pr_debug("%s: cmd cfg pcm was block failed", __func__);
 
 	prtd->enabled = RUNNING;
+	msm_pcm_reset_asm_fail(ASM_OPEN_READ);
 
 	return ret;
 }
@@ -1329,14 +1371,14 @@ static int msm_pcm_capture_copy(struct snd_pcm_substream *substream,
 		offset = prtd->in_frame_info[idx].offset;
 		pr_debug("Offset value = %d\n", offset);
 
-		if (offset >= size) {
+		if (size && offset >= size) {
 			pr_err("%s: Invalid dsp buf offset\n", __func__);
 			ret = -EFAULT;
 			q6asm_cpu_buf_release(OUT, prtd->audio_client);
 			goto fail;
 		}
 
-		if (size == 0 || size < prtd->pcm_count) {
+		if ((size == 0 || size < prtd->pcm_count) && ((offset + size) < prtd->pcm_count)) {
 			memset(bufptr + offset + size, 0, prtd->pcm_count - size);
 			if (fbytes > prtd->pcm_count)
 				size = xfer = prtd->pcm_count;
@@ -2681,10 +2723,17 @@ static int msm_pcm_channel_mixer_cfg_ctl_put(struct snd_kcontrol *kcontrol,
 	if (chmixer_pspd->enable && prtd && prtd->audio_client) {
 		stream_id = prtd->audio_client->session;
 		be_id = chmixer_pspd->port_idx;
+#ifdef CONFIG_PLATFORM_AUTO
+		msm_pcm_routing_set_channel_mixer_runtime(fe_id, be_id,
+				stream_id,
+				session_type,
+				chmixer_pspd);
+#else
 		msm_pcm_routing_set_channel_mixer_runtime(be_id,
 				stream_id,
 				session_type,
 				chmixer_pspd);
+#endif
 	}
 
 	if (reset_override_out_ch_map)

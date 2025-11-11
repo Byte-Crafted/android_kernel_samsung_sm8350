@@ -139,6 +139,8 @@ COMMON_INC :=	-I$(AUDIO_ROOT)/$(COMMON_DIR)
 
 ############ ASoC Drivers ############
 
+MACHINE_OBJS += msm-common.o
+
 # for SM8150 sound card driver
 ifdef CONFIG_SND_SOC_SM8150
 	MACHINE_OBJS += sm8150.o
@@ -250,6 +252,11 @@ ifdef CONFIG_SND_HWDEP_ROUTING
 endif
 ifdef CONFIG_QTI_PP
 	PLATFORM_OBJS += msm-qti-pp-config.o
+endif
+
+ifdef CONFIG_SEC_SND_ADAPTATION
+	PLATFORM_OBJS += sec_audio_adaptation.o
+	PLATFORM_OBJS += sec_voice_adaptation.o
 endif
 
 LINUX_INC +=	-Iinclude/linux

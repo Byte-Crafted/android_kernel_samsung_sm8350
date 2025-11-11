@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 #include <linux/module.h>
 #include <linux/slab.h>
@@ -21,6 +21,9 @@
 #include <ipc/apr.h>
 #include "adsp_err.h"
 #include <soc/qcom/secure_buffer.h>
+#ifdef CONFIG_SEC_SND_ADAPTATION
+#include <dsp/q6voice_adaptation.h>
+#endif /* CONFIG_SEC_SND_ADAPTATION */
 
 #define TIMEOUT_MS 1000
 
@@ -1713,16 +1716,11 @@ static int32_t adm_callback(struct apr_client_data *data, void *priv)
 		if (data->opcode == APR_BASIC_RSP_RESULT) {
 			pr_debug("%s: APR_BASIC_RSP_RESULT id 0x%x\n",
 				__func__, payload[0]);
-
-			if (!((client_id != ADM_CLIENT_ID_SOURCE_TRACKING) &&
-			     ((payload[0] == ADM_CMD_SET_PP_PARAMS_V5) ||
-			      (payload[0] == ADM_CMD_SET_PP_PARAMS_V6)))) {
-				if (data->payload_size <
-						(2 * sizeof(uint32_t))) {
-					pr_err("%s: Invalid payload size %d\n",
-						__func__, data->payload_size);
-					return 0;
-				}
+			if (data->payload_size <
+					(2 * sizeof(uint32_t))) {
+				pr_err("%s: Invalid payload size %d\n",
+					__func__, data->payload_size);
+				return 0;
 			}
 
 			if (payload[1] != 0) {
@@ -2738,6 +2736,12 @@ int adm_arrange_mch_map(struct adm_cmd_device_open_v5 *open, int path,
 		goto non_mch_path;
 	};
 
+	pr_info("%s : channel_mode = %d, num_channel = %d, set_channel_map = %d\n",
+		__func__,
+		channel_mode,
+		open->dev_num_channel,
+		multi_ch_maps[idx].set_channel_map);
+
 	if ((open->dev_num_channel > 2) &&
 		(port_channel_map[port_idx].set_channel_map ||
 		 multi_ch_maps[idx].set_channel_map)) {
@@ -3433,9 +3437,12 @@ int adm_open_v2(int port_id, int path, int rate, int channel_mode, int topology,
 					ec_ref_port_cfg->sampling_rate :
 					this_adm.ec_ref_rx_sampling_rate;
 
-	pr_debug("%s:port %#x path:%d rate:%d mode:%d perf_mode:%d,topo_id %d\n",
+	pr_info("%s:port %#x path:%d rate:%d mode:%d perf_mode:%d,topo_id %d\n",
 		 __func__, port_id, path, rate, channel_mode, perf_mode,
 		 topology);
+
+	pr_info("%s:bit_width:%d app_type:%#x acdb_id:%d\n",
+		__func__, bit_width, app_type, acdb_id);
 
 	port_id = q6audio_convert_virtual_to_portid(port_id);
 	port_idx = adm_validate_and_get_port_index(port_id);
@@ -3502,6 +3509,18 @@ int adm_open_v2(int port_id, int path, int rate, int channel_mode, int topology,
 		    (rate != ADM_CMD_COPP_OPEN_SAMPLE_RATE_32K))
 			rate = 16000;
 	}
+
+#ifdef CONFIG_SEC_SND_ADAPTATION
+	if ((topology == VPM_TX_SM_LVVEFQ_COPP_TOPOLOGY) ||
+		(topology == VPM_TX_DM_LVVEFQ_COPP_TOPOLOGY) ||
+		(topology == VPM_TX_SM_LVSAFQ_COPP_TOPOLOGY) ||
+		(topology == VPM_TX_DM_LVSAFQ_COPP_TOPOLOGY) ||
+		(topology == VOICE_TX_DIAMONDVOICE_FVSAM_SM) ||
+		(topology == VOICE_TX_DIAMONDVOICE_FVSAM_DM) ||
+		(topology == VOICE_TX_DIAMONDVOICE_FVSAM_QM) ||
+		(topology == VOICE_TX_DIAMONDVOICE_FRSAM_DM))
+		rate = 16000;
+#endif /* CONFIG_SEC_SND_ADAPTATION */
 
 	if (topology == FFECNS_TOPOLOGY) {
 		this_adm.ffecns_port_id = port_id;
@@ -3915,10 +3934,14 @@ void adm_copp_mfc_cfg(int port_id, int copp_idx, int dst_sample_rate)
 		pr_err("%s: unable to get channal map\n", __func__);
 		goto fail_cmd;
 	}
-
-	for (i = 0; i < mfc_cfg.num_channels; i++)
-		mfc_cfg.channel_type[i] =
+	if (mfc_cfg.num_channels <= AUDPROC_MFC_OUT_CHANNELS_MAX) {
+		for (i = 0; i < mfc_cfg.num_channels; i++)
+			mfc_cfg.channel_type[i] =
 			(uint16_t) open.dev_channel_mapping[i];
+	} else {
+ 		pr_err("%s: size of  num_channels is greater than channel type \n", __func__);
+		goto fail_cmd;
+	}
 
 	atomic_set(&this_adm.copp.stat[port_idx][copp_idx], -1);
 
@@ -4259,7 +4282,7 @@ int adm_close(int port_id, int perf_mode, int copp_idx)
 	struct audio_cal_info_audproc *audproc_cal_info = NULL;
 	int cal_index = ADM_AUDPROC_PERSISTENT_CAL;
 
-	pr_debug("%s: port_id=0x%x perf_mode: %d copp_idx: %d\n", __func__,
+	pr_info("%s: port_id=0x%x perf_mode: %d copp_idx: %d\n", __func__,
 		 port_id, perf_mode, copp_idx);
 
 	port_id = q6audio_convert_virtual_to_portid(port_id);
@@ -5982,6 +6005,101 @@ done:
 	return ret;
 }
 EXPORT_SYMBOL(adm_get_source_tracking);
+
+/**
+ * adm_get_fnn_source_tracking -
+ *        Retrieve sound track info
+ *
+ * @port_id: Port ID number
+ * @copp_idx: copp index assigned
+ * @FnnSourceTrackingData: pointer for source track data to be updated with
+ *
+ * Returns 0 on success or error on failure
+ */
+int adm_get_fnn_source_tracking(int port_id, int copp_idx,
+			struct fluence_nn_source_tracking_param *FnnSourceTrackingData)
+{
+	int ret = 0, i;
+	char *params_value;
+	uint32_t max_param_size = 0;
+	struct adm_param_fluence_nn_source_tracking_t *fnn_sourcetrack_params = NULL;
+	struct param_hdr_v3 param_hdr;
+
+	pr_debug("%s: Enter, port_id %d, copp_idx %d\n",
+		  __func__, port_id, copp_idx);
+
+	max_param_size = sizeof(struct adm_param_fluence_nn_source_tracking_t) +
+			 sizeof(union param_hdrs);
+	params_value = kzalloc(max_param_size, GFP_KERNEL);
+	if (!params_value)
+		return -ENOMEM;
+
+	memset(&param_hdr, 0, sizeof(param_hdr));
+	param_hdr.module_id = MODULE_ID_FLUENCE_NN;
+	param_hdr.instance_id = INSTANCE_ID_0;
+	param_hdr.param_id = AUDPROC_PARAM_ID_FLUENCE_NN_SOURCE_TRACKING;
+	param_hdr.param_size = max_param_size;
+	ret = adm_get_pp_params(port_id, copp_idx,
+				ADM_CLIENT_ID_SOURCE_TRACKING, NULL, &param_hdr,
+				params_value);
+	if (ret) {
+		pr_err("%s: get parameters failed ret:%d\n", __func__, ret);
+		ret = -EINVAL;
+		goto done;
+	}
+
+	if (this_adm.sourceTrackingData.apr_cmd_status != 0) {
+		pr_err("%s - get params returned error [%s]\n",
+			__func__, adsp_err_get_err_str(
+			this_adm.sourceTrackingData.apr_cmd_status));
+		ret = adsp_err_get_lnx_err_code(
+				this_adm.sourceTrackingData.apr_cmd_status);
+		goto done;
+	}
+
+	fnn_sourcetrack_params = (struct adm_param_fluence_nn_source_tracking_t *) params_value;
+	if ((!FnnSourceTrackingData) || (!fnn_sourcetrack_params)) {
+		pr_err("%s: Caught NULL pointer \n", __func__);
+		ret = -EINVAL;
+		goto done;
+	}
+
+	FnnSourceTrackingData->speech_probablity_q20 =
+		fnn_sourcetrack_params->speech_probablity_q20;
+	pr_debug("%s: speech_probablity_q20 = %d\n",
+			__func__, FnnSourceTrackingData->speech_probablity_q20);
+
+	for (i = 0; i < MAX_TOP_SPEAKERS; i++) {
+		FnnSourceTrackingData->speakers[i] =
+			fnn_sourcetrack_params->speakers[i];
+		pr_debug("%s: speakers[%d] = %d\n",
+			__func__, i, FnnSourceTrackingData->speakers[i]);
+	}
+
+	for (i = 0; i < MAX_POLAR_ACTIVITY_INDICATORS; i++) {
+		FnnSourceTrackingData->polarActivity[i] =
+			fnn_sourcetrack_params->polarActivity[i];
+		pr_debug("%s: polarActivity[%d] = %d\n",
+		 __func__, i, FnnSourceTrackingData->polarActivity[i]);
+	}
+
+	FnnSourceTrackingData->session_time_lsw =
+			fnn_sourcetrack_params->session_time_lsw;
+	pr_debug("%s: session_time_lsw = %x\n",
+		  __func__, FnnSourceTrackingData->session_time_lsw);
+
+	FnnSourceTrackingData->session_time_msw =
+			fnn_sourcetrack_params->session_time_msw;
+	pr_debug("%s: session_time_msw = %x\n",
+		  __func__, FnnSourceTrackingData->session_time_msw);
+
+done:
+	pr_debug("%s: Exit, ret = %d\n", __func__, ret);
+
+	kfree(params_value);
+	return ret;
+}
+EXPORT_SYMBOL(adm_get_fnn_source_tracking);
 
 /**
  * adm_get_doa_tracking_mon -

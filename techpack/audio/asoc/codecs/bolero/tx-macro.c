@@ -134,6 +134,19 @@ struct tx_macro_reg_mask_val {
 	u8 val;
 };
 
+/* Based on 9.6MHZ MCLK Freq */
+enum {
+	CLK_DISABLED = 0,
+	CLK_2P4MHZ,
+	CLK_0P6MHZ,
+};
+
+static int dmic_clk_rate_div[] = {
+	[CLK_DISABLED] = 0,
+	[CLK_2P4MHZ] = TX_MACRO_CLK_DIV_4,
+	[CLK_0P6MHZ] = TX_MACRO_CLK_DIV_16,
+};
+
 struct tx_mute_work {
 	struct tx_macro_priv *tx_priv;
 	u32 decimator;
@@ -186,7 +199,15 @@ struct tx_macro_priv {
 	bool register_event_listener;
 	u16 current_clk_id;
 	int disable_afe_wakeup_event_listener;
+	u32 mclk_freq;
+	u32 dmic_rate_override;
 };
+
+static const char* const dmic_rate_override_text[] = {
+	"DISABLED", "CLK_2P4MHZ", "CLK_0P6MHZ"
+};
+
+static SOC_ENUM_SINGLE_EXT_DECL(dmic_rate_enum, dmic_rate_override_text);
 
 static bool tx_macro_get_data(struct snd_soc_component *component,
 			      struct device **tx_dev,
@@ -216,6 +237,41 @@ static bool tx_macro_get_data(struct snd_soc_component *component,
 	return true;
 }
 
+static int dmic_rate_override_get(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct tx_macro_priv *tx_priv = NULL;
+	struct device *tx_dev = NULL;
+
+	if (!tx_macro_get_data(component, &tx_dev, &tx_priv, __func__))
+		return -EINVAL;
+
+	ucontrol->value.enumerated.item[0] = tx_priv->dmic_rate_override;
+	dev_dbg(component->dev, "%s: dmic rate: %d\n",
+		__func__, tx_priv->dmic_rate_override);
+
+	return 0;
+}
+
+static int dmic_rate_override_put(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component =
+			snd_soc_kcontrol_component(kcontrol);
+	struct tx_macro_priv *tx_priv = NULL;
+	struct device *tx_dev = NULL;
+
+	if (!tx_macro_get_data(component, &tx_dev, &tx_priv, __func__))
+		return -EINVAL;
+
+	tx_priv->dmic_rate_override = ucontrol->value.enumerated.item[0];
+	dev_dbg(component->dev, "%s: dmic rate: %d\n",
+		__func__, tx_priv->dmic_rate_override);
+
+	return 0;
+}
 static int tx_macro_mclk_enable(struct tx_macro_priv *tx_priv,
 				bool mclk_enable)
 {
@@ -2487,6 +2543,9 @@ static const struct snd_kcontrol_new tx_macro_snd_controls_common[] = {
 
 	SOC_ENUM_EXT("BCS CH_SEL", bcs_ch_sel_mux_enum,
 			tx_macro_get_bcs_ch_sel, tx_macro_put_bcs_ch_sel),
+
+	SOC_ENUM_EXT("DMIC_RATE OVERRIDE", dmic_rate_enum,
+			dmic_rate_override_get, dmic_rate_override_put),
 };
 
 static const struct snd_kcontrol_new tx_macro_snd_controls_v3[] = {
@@ -2583,6 +2642,9 @@ static const struct snd_kcontrol_new tx_macro_snd_controls[] = {
 
 	SOC_SINGLE_EXT("DEC0_BCS Switch", SND_SOC_NOPM, 0, 1, 0,
 		       tx_macro_get_bcs, tx_macro_set_bcs),
+
+	SOC_ENUM_EXT("DMIC_RATE OVERRIDE", dmic_rate_enum,
+			dmic_rate_override_get, dmic_rate_override_put),
 };
 
 static int tx_macro_register_event_listener(struct snd_soc_component *component,
@@ -2808,6 +2870,9 @@ static int tx_macro_clk_div_get(struct snd_soc_component *component)
 	if (!tx_macro_get_data(component, &tx_dev, &tx_priv, __func__))
 		return -EINVAL;
 
+	if (tx_priv->dmic_rate_override)
+		return dmic_clk_rate_div[tx_priv->dmic_rate_override];
+
 	return tx_priv->dmic_clk_div;
 }
 
@@ -2985,13 +3050,12 @@ static int tx_macro_validate_dmic_sample_rate(u32 dmic_sample_rate,
 				      struct tx_macro_priv *tx_priv)
 {
 	u32 div_factor = TX_MACRO_CLK_DIV_2;
-	u32 mclk_rate = TX_MACRO_MCLK_FREQ;
 
 	if (dmic_sample_rate == TX_MACRO_DMIC_SAMPLE_RATE_UNDEFINED ||
-	    mclk_rate % dmic_sample_rate != 0)
+	    tx_priv->mclk_freq % dmic_sample_rate != 0)
 		goto undefined_rate;
 
-	div_factor = mclk_rate / dmic_sample_rate;
+	div_factor = tx_priv->mclk_freq / dmic_sample_rate;
 
 	switch (div_factor) {
 	case 2:
@@ -3019,13 +3083,13 @@ static int tx_macro_validate_dmic_sample_rate(u32 dmic_sample_rate,
 
 	/* Valid dmic DIV factors */
 	dev_dbg(tx_priv->dev, "%s: DMIC_DIV = %u, mclk_rate = %u\n",
-		__func__, div_factor, mclk_rate);
+		__func__, div_factor, tx_priv->mclk_freq);
 
 	return dmic_sample_rate;
 
 undefined_rate:
 	dev_dbg(tx_priv->dev, "%s: Invalid rate %d, for mclk %d\n",
-		 __func__, dmic_sample_rate, mclk_rate);
+		 __func__, dmic_sample_rate, tx_priv->mclk_freq);
 	dmic_sample_rate = TX_MACRO_DMIC_SAMPLE_RATE_UNDEFINED;
 
 	return dmic_sample_rate;
@@ -3033,6 +3097,9 @@ undefined_rate:
 
 static const struct tx_macro_reg_mask_val tx_macro_reg_init[] = {
 	{BOLERO_CDC_TX0_TX_PATH_SEC7, 0x3F, 0x0A},
+	{BOLERO_CDC_TX0_TX_PATH_CFG1, 0x0F, 0x0A},
+	{BOLERO_CDC_TX1_TX_PATH_CFG1, 0x0F, 0x0A},
+	{BOLERO_CDC_TX2_TX_PATH_CFG1, 0x0F, 0x0A},
 };
 
 static int tx_macro_init(struct snd_soc_component *component)
@@ -3362,10 +3429,11 @@ static int tx_macro_probe(struct platform_device *pdev)
 {
 	struct macro_ops ops = {0};
 	struct tx_macro_priv *tx_priv = NULL;
-	u32 tx_base_addr = 0, sample_rate = 0;
+	u32 tx_base_addr = 0, sample_rate = 0, mclk_freq = 0;
 	char __iomem *tx_io_base = NULL;
 	int ret = 0;
 	const char *dmic_sample_rate = "qcom,tx-dmic-sample-rate";
+	const char *cdc_mclk_clk_rate = "qcom,cdc-mclk-clk-rate";
 	u32 is_used_tx_swr_gpio = 1;
 	const char *is_used_tx_swr_gpio_dt = "qcom,is-used-swr-gpio";
 	u32 disable_afe_wakeup_event_listener = 0;
@@ -3425,6 +3493,17 @@ static int tx_macro_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 	tx_priv->tx_io_base = tx_io_base;
+
+	ret = of_property_read_u32(pdev->dev.of_node, cdc_mclk_clk_rate,
+				   &mclk_freq);
+	if (ret) {
+		tx_priv->mclk_freq = TX_MACRO_MCLK_FREQ;
+	} else {
+		tx_priv->mclk_freq = mclk_freq;
+	}
+	dev_dbg(tx_priv->dev,
+		"%s: mclk_freq = %u\n", __func__, tx_priv->mclk_freq);
+
 	ret = of_property_read_u32(pdev->dev.of_node, dmic_sample_rate,
 				   &sample_rate);
 	if (ret) {

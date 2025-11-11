@@ -532,10 +532,10 @@ static struct msm_vidc_codec_capability lahaina_capabilities[] = {
 
 	/* Level for AVC, HEVC and VP9 decoder specific */
 	{CAP_H264_LEVEL, DEC, H264, V4L2_MPEG_VIDEO_H264_LEVEL_1_0,
-	                            V4L2_MPEG_VIDEO_H264_LEVEL_6_1, 1,
+	                            V4L2_MPEG_VIDEO_H264_LEVEL_6_2, 1,
 	                            V4L2_MPEG_VIDEO_H264_LEVEL_5_0},
 	{CAP_HEVC_LEVEL, DEC, HEVC, V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
-	                            V4L2_MPEG_VIDEO_HEVC_LEVEL_6_1, 1,
+	                            V4L2_MPEG_VIDEO_HEVC_LEVEL_6_2, 1,
 	                            V4L2_MPEG_VIDEO_HEVC_LEVEL_5},
 	{CAP_VP9_LEVEL, DEC, VP9, V4L2_MPEG_VIDC_VIDEO_VP9_LEVEL_UNUSED,
                                 V4L2_MPEG_VIDC_VIDEO_VP9_LEVEL_51, 1,
@@ -1123,12 +1123,12 @@ static struct msm_vidc_vpss_capability vpss_capabilities[] = {
  * 3x3 transformation matrix coefficients in s4.9 fixed point format
  */
 static u32 vpe_csc_custom_matrix_coeff[HAL_MAX_MATRIX_COEFFS] = {
-	440, 8140, 8098, 0, 460, 52, 0, 34, 463
+	0x1BE, 0x1FCC, 0x1FA1, 0, 0x1CC, 0x34, 0, 0x22, 0x1CF
 };
 
 /* offset coefficients in s9 fixed point format */
 static u32 vpe_csc_custom_bias_coeff[HAL_MAX_BIAS_COEFFS] = {
-	53, 0, 4
+	0x33, 0, 0x4
 };
 
 /* clamping value for Y/U/V([min,max] for Y/U/V) */

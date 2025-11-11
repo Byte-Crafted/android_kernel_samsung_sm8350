@@ -63,6 +63,13 @@
 #define CREATE_TRACE_POINTS
 #include "sde_trace.h"
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+#if defined(CONFIG_SEC_DEBUG)
+#include <linux/sec_debug.h>
+#endif
+#include "ss_dsi_panel_debug.h" // case 04436106
+#endif
+
 /* defines for secure channel call */
 #define MEM_PROTECT_SD_CTRL_SWITCH 0x18
 #define MDP_DEVICE_ID            0x1A
@@ -107,6 +114,79 @@ static const char * const iommu_ports[] = {
 static bool sdecustom = true;
 module_param(sdecustom, bool, 0400);
 MODULE_PARM_DESC(sdecustom, "Enable customizations for sde clients");
+
+#define SDE_REG_EVT32(...) sde_evtlog_log(sde_dbg_base_evtlog, func_name, \
+		line_num, SDE_EVTLOG_ALWAYS, ##__VA_ARGS__, \
+		SDE_EVTLOG_DATA_LIMITER)
+
+#define MAX_REG_COUNT 1
+
+struct reg_log_info {
+	u32 reg_off;
+	void __iomem *reg_mem;
+};
+static struct reg_log_info reg_info[MAX_REG_COUNT];
+
+struct reg_log_value {
+	u32 reg_off;
+	u32 reg_val;
+};
+
+static bool g_init_done = false;
+static bool g_cont_splash = true;
+
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_UML)
+static void _reg_log_init(void)
+#else
+static void _reg_log_init()
+#endif
+{
+	sde_dbg_init(NULL);
+	reg_info[0].reg_off = 0xAE6BAB0; // INTF_LINE_COUNT
+	reg_info[0].reg_mem = ioremap(reg_info[0].reg_off, 4);
+}
+
+void reg_log_dump(const char *func_name, int line_num)
+{
+	struct reg_log_value value[5] = {{0}};
+	int i;
+
+	if (!g_cont_splash)
+		return;
+
+	if (!g_init_done) {
+		_reg_log_init();
+		g_init_done = true;
+	}
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	{
+		/* PBA booting skip */
+		extern int ss_panel_attached(int ndx);
+
+		if (!(ss_panel_attached(0) || ss_panel_attached(1)))
+			return;
+	}
+#endif
+
+	for (i = 0 ; i < MAX_REG_COUNT; i++) {
+		if (reg_info[i].reg_off)
+			value[i].reg_off = reg_info[i].reg_off;
+
+		if (!IS_ERR_OR_NULL(reg_info[i].reg_mem))
+			value[i].reg_val = readl_relaxed(reg_info[i].reg_mem);
+	}
+
+	SDE_REG_EVT32(func_name, line_num, i, 0xdddd,
+				value[0].reg_off, value[0].reg_val,
+				value[1].reg_off, value[1].reg_val,
+				value[2].reg_off, value[2].reg_val,
+				value[3].reg_off, value[3].reg_val,
+				value[4].reg_off, value[4].reg_val);
+
+	pr_debug("auto-refresh: %s:%d, off:0x%x, val:0x%x\n", func_name, line_num,
+			value[0].reg_off, value[0].reg_val);
+}
 
 static int sde_kms_hw_init(struct msm_kms *kms);
 static int _sde_kms_mmu_destroy(struct sde_kms *sde_kms);
@@ -219,6 +299,10 @@ static int sde_kms_enable_vblank(struct msm_kms *kms, struct drm_crtc *crtc)
 	SDE_ATRACE_BEGIN("sde_kms_enable_vblank");
 	ret = sde_crtc_vblank(crtc, true);
 	SDE_ATRACE_END("sde_kms_enable_vblank");
+
+#if defined(CONFIG_DISPLAY_SAMSUNG) // case 04436106
+	SS_XLOG_VSYNC(ret);
+#endif
 
 	return ret;
 }
@@ -779,6 +863,14 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 
 	/* leave ramdump memory only if base address matches */
 	if (ramdump_base == mem_addr &&
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_SEC_DEBUG)
+			/* case 1) upload mode: release splash memory except disp_rdump_memory
+			 *		   which is used for framebuffer in upload mode bootloader
+			 * case 2) None-upload mode: release whole splash memory
+			 *		   which is used for framebuffer in normal booitng mode bootloader
+			 */
+			sec_debug_is_enabled() &&
+#endif
 			ramdump_buffer_size <= splash_buffer_size) {
 		mem_addr +=  ramdump_buffer_size;
 		splash_buffer_size -= ramdump_buffer_size;
@@ -794,6 +886,11 @@ static int _sde_kms_release_splash_buffer(unsigned int mem_addr,
 	}
 	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
 		free_reserved_page(pfn_to_page(pfn_idx));
+
+#if defined(CONFIG_DISPLAY_SAMSUNG) && defined(CONFIG_SEC_DEBUG)
+	SDE_INFO("release splash buffer: addr: %lx, size: %x, sec_debug: %d\n",
+			mem_addr, splash_buffer_size, sec_debug_is_enabled());
+#endif
 
 	return ret;
 
@@ -1034,6 +1131,7 @@ int sde_kms_vm_primary_prepare_commit(struct sde_kms *sde_kms,
 	struct drm_connector *connector;
 	struct sde_vm_ops *vm_ops;
 	struct sde_crtc_state *cstate;
+	struct drm_connector_list_iter iter;
 	enum sde_crtc_vm_req vm_req;
 	int rc = 0;
 
@@ -1070,9 +1168,11 @@ int sde_kms_vm_primary_prepare_commit(struct sde_kms *sde_kms,
 	}
 
 	/* Schedule ESD work */
-	list_for_each_entry(connector, &ddev->mode_config.connector_list, head)
+	drm_connector_list_iter_begin(ddev, &iter);
+	drm_for_each_connector_iter(connector, &iter)
 		if (drm_connector_mask(connector) & crtc->state->connector_mask)
 			sde_connector_schedule_status_work(connector, true);
+	drm_connector_list_iter_end(&iter);
 
 	/* enable vblank events */
 	drm_crtc_vblank_on(crtc);
@@ -1282,6 +1382,72 @@ static void _sde_kms_release_splash_resource(struct sde_kms *sde_kms,
 	}
 }
 
+static void sde_kms_cancel_delayed_work(struct drm_crtc *crtc)
+{
+	struct drm_connector *connector;
+	struct drm_connector_list_iter iter;
+	struct drm_encoder *encoder;
+
+	/* Cancel CRTC work */
+	sde_crtc_cancel_delayed_work(crtc);
+
+	/* Cancel ESD work */
+	drm_connector_list_iter_begin(crtc->dev, &iter);
+	drm_for_each_connector_iter(connector, &iter)
+		if (drm_connector_mask(connector) & crtc->state->connector_mask)
+			sde_connector_schedule_status_work(connector, false);
+	drm_connector_list_iter_end(&iter);
+
+	/* Cancel Idle-PC work */
+	drm_for_each_encoder_mask(encoder, crtc->dev, crtc->state->encoder_mask) {
+		if (sde_encoder_in_clone_mode(encoder))
+			continue;
+
+		sde_encoder_cancel_delayed_work(encoder);
+	}
+}
+
+int sde_kms_vm_pre_release(struct sde_kms *sde_kms,
+	struct drm_atomic_state *state, bool is_primary)
+{
+	struct drm_crtc *crtc;
+	struct drm_encoder *encoder;
+	int rc = 0;
+
+	crtc = sde_kms_vm_get_vm_crtc(state);
+	if (!crtc)
+		return 0;
+
+	/* if vm_req is enabled, once CRTC on the commit is guaranteed */
+	sde_kms_wait_for_frame_transfer_complete(&sde_kms->base, crtc);
+
+	sde_kms_cancel_delayed_work(crtc);
+
+	/* disable SDE irq's */
+	drm_for_each_encoder_mask(encoder, crtc->dev,
+					crtc->state->encoder_mask) {
+		if (sde_encoder_in_clone_mode(encoder))
+			continue;
+
+		sde_encoder_irq_control(encoder, false);
+	}
+
+	if (is_primary) {
+		/* disable IRQ line */
+		sde_irq_update(&sde_kms->base, false);
+
+		/* disable vblank events */
+		drm_crtc_vblank_off(crtc);
+
+		/* reset sw state */
+		sde_crtc_reset_sw_state(crtc);
+	}
+
+	sde_dbg_set_hw_ownership_status(false);
+
+	return rc;
+}
+
 int sde_kms_vm_trusted_post_commit(struct sde_kms *sde_kms,
 	struct drm_atomic_state *state)
 {
@@ -1289,7 +1455,6 @@ int sde_kms_vm_trusted_post_commit(struct sde_kms *sde_kms,
 	struct drm_device *ddev;
 	struct drm_crtc *crtc;
 	struct drm_plane *plane;
-	struct drm_encoder *encoder;
 	struct sde_crtc_state *cstate;
 	struct drm_crtc_state *new_cstate;
 	enum sde_crtc_vm_req vm_req;
@@ -1311,23 +1476,12 @@ int sde_kms_vm_trusted_post_commit(struct sde_kms *sde_kms,
 	if (vm_req != VM_REQ_RELEASE)
 		return 0;
 
-	/* if vm_req is enabled, once CRTC on the commit is guaranteed */
-	sde_kms_wait_for_frame_transfer_complete(&sde_kms->base, crtc);
-
-	drm_for_each_encoder_mask(encoder, crtc->dev,
-					crtc->state->encoder_mask) {
-		if (sde_encoder_in_clone_mode(encoder))
-			continue;
-
-		sde_encoder_irq_control(encoder, false);
-	}
+	sde_kms_vm_pre_release(sde_kms, state, false);
 
 	list_for_each_entry(plane, &ddev->mode_config.plane_list, head)
 		sde_plane_set_sid(plane, 0);
 
 	sde_hw_set_lutdma_sid(sde_kms->hw_sid, 0);
-
-	sde_dbg_set_hw_ownership_status(false);
 
 	sde_vm_lock(sde_kms);
 
@@ -1335,62 +1489,6 @@ int sde_kms_vm_trusted_post_commit(struct sde_kms *sde_kms,
 		rc = vm_ops->vm_release(sde_kms);
 
 	sde_vm_unlock(sde_kms);
-
-	return rc;
-}
-
-int sde_kms_vm_pre_release(struct sde_kms *sde_kms,
-	struct drm_atomic_state *state)
-{
-	struct drm_device *ddev;
-	struct drm_crtc *crtc;
-	struct drm_encoder *encoder;
-	struct drm_connector *connector;
-	int rc = 0;
-	struct msm_drm_private *priv;
-
-	ddev = sde_kms->dev;
-
-	crtc = sde_kms_vm_get_vm_crtc(state);
-	if (!crtc)
-		return 0;
-
-	priv = crtc->dev->dev_private;
-	/* if vm_req is enabled, once CRTC on the commit is guaranteed */
-	sde_kms_wait_for_frame_transfer_complete(&sde_kms->base, crtc);
-
-	/* disable ESD work */
-	list_for_each_entry(connector,
-			&ddev->mode_config.connector_list, head) {
-		if (drm_connector_mask(connector) & crtc->state->connector_mask)
-			sde_connector_schedule_status_work(connector, false);
-	}
-
-	/* disable SDE irq's */
-	drm_for_each_encoder_mask(encoder, crtc->dev,
-					crtc->state->encoder_mask) {
-		if (sde_encoder_in_clone_mode(encoder))
-			continue;
-
-		sde_encoder_irq_control(encoder, false);
-	}
-
-	/* disable IRQ line */
-	sde_irq_update(&sde_kms->base, false);
-
-	/* disable vblank events */
-	drm_crtc_vblank_off(crtc);
-
-	/*
-	 * Flush event thread queue for any pending events as vblank work
-	 * might get scheduled from drm_crtc_vblank_off
-	 */
-	kthread_flush_worker(&priv->event_thread[crtc->index].worker);
-
-	/* reset sw state */
-	sde_crtc_reset_sw_state(crtc);
-
-	sde_dbg_set_hw_ownership_status(false);
 
 	return rc;
 }
@@ -1421,7 +1519,7 @@ int sde_kms_vm_primary_post_commit(struct sde_kms *sde_kms,
 		return 0;
 
 	/* handle SDE pre-release */
-	rc = sde_kms_vm_pre_release(sde_kms, state);
+	rc = sde_kms_vm_pre_release(sde_kms, state, true);
 	if (rc) {
 		SDE_ERROR("sde vm pre_release failed, rc=%d\n", rc);
 		goto exit;
@@ -1710,9 +1808,15 @@ static void _sde_kms_release_displays(struct sde_kms *sde_kms)
 	sde_kms->wb_displays = NULL;
 	sde_kms->wb_display_count = 0;
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	sde_kms->dsi_display_count = 0;
+	kfree(sde_kms->dsi_displays);
+	sde_kms->dsi_displays = NULL;
+#else
 	kfree(sde_kms->dsi_displays);
 	sde_kms->dsi_displays = NULL;
 	sde_kms->dsi_display_count = 0;
+#endif
 }
 
 /**
@@ -2177,6 +2281,11 @@ void sde_kms_timeline_status(struct drm_device *dev)
 	mutex_unlock(&dev->mode_config.mutex);
 }
 
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+int sde_core_perf_sysfs_init(struct sde_kms *sde_kms);
+int sde_core_perf_sysfs_deinit(struct sde_kms *sde_kms);
+#endif
+
 static int sde_kms_postinit(struct msm_kms *kms)
 {
 	struct sde_kms *sde_kms = to_sde_kms(kms);
@@ -2220,6 +2329,12 @@ static int sde_kms_postinit(struct msm_kms *kms)
 	rc = _sde_debugfs_init(sde_kms);
 	if (rc)
 		SDE_ERROR("sde_debugfs init failed: %d\n", rc);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	rc = sde_core_perf_sysfs_init(sde_kms);
+	if (rc)
+		SDE_ERROR("sde_core_sysfs init failed: %d\n", rc);
+#endif
 
 	drm_for_each_crtc(crtc, dev)
 		sde_crtc_post_init(dev, crtc);
@@ -2277,6 +2392,10 @@ static void _sde_kms_hw_destroy(struct sde_kms *sde_kms,
 	_sde_kms_release_displays(sde_kms);
 
 	_sde_kms_unmap_all_splash_regions(sde_kms);
+
+#if defined(CONFIG_DISPLAY_SAMSUNG)
+	sde_core_perf_sysfs_deinit(sde_kms);
+#endif
 
 	if (sde_kms->catalog) {
 		for (i = 0; i < sde_kms->catalog->vbif_count; i++) {
@@ -2462,6 +2581,7 @@ static int sde_kms_set_crtc_for_conn(struct drm_device *dev,
 	}
 
 	crtc_state->active = true;
+	crtc_state->enable = true;
 	ret = drm_atomic_set_crtc_for_connector(conn_state, enc->crtc);
 	if (ret)
 		SDE_ERROR("error %d setting the crtc\n", ret);
@@ -2566,6 +2686,11 @@ error:
 
 		list_del_init(&fb->filp_head);
 		drm_framebuffer_put(fb);
+	}
+
+	drm_for_each_crtc(crtc, dev) {
+		if (!ret && crtc_mask & drm_crtc_mask(crtc))
+			sde_kms_cancel_delayed_work(crtc);
 	}
 
 end:
@@ -2785,7 +2910,6 @@ static int sde_kms_check_vm_request(struct msm_kms *kms,
 	if (!vm_ops->vm_request_valid || !vm_ops->vm_owns_hw ||
 				!vm_ops->vm_acquire)
 		return -EINVAL;
-
 
 	for_each_oldnew_crtc_in_state(state, crtc, old_cstate, new_cstate, i) {
 		struct sde_crtc_state *old_state = NULL, *new_state = NULL;
@@ -3644,7 +3768,7 @@ static int sde_kms_get_dsc_count(const struct msm_kms *kms,
 	return 0;
 }
 
-static void _sde_kms_null_commit(struct drm_device *dev,
+static int _sde_kms_null_commit(struct drm_device *dev,
 		struct drm_encoder *enc)
 {
 	struct drm_modeset_acquire_ctx ctx;
@@ -3687,6 +3811,8 @@ end:
 
 	drm_modeset_drop_locks(&ctx);
 	drm_modeset_acquire_fini(&ctx);
+
+	return ret;
 }
 
 
@@ -3715,6 +3841,50 @@ void sde_kms_display_early_wakeup(struct drm_device *dev,
 
 	drm_connector_list_iter_end(&conn_iter);
 }
+static int sde_kms_trigger_null_flush(struct msm_kms *kms)
+{
+	struct sde_kms *sde_kms;
+	struct sde_splash_display *splash_display;
+	struct drm_crtc *crtc;
+	int i, rc = 0;
+
+	if (!kms) {
+		SDE_ERROR("invalid kms\n");
+		return -EINVAL;
+	}
+
+	sde_kms = to_sde_kms(kms);
+
+	/* If splash handoff is done, early return*/
+	if (!sde_kms->splash_data.num_splash_displays)
+		return 0;
+
+	/* If all builtin-displays are having cont splash enabled, ignore lastclose*/
+	if (sde_kms->dsi_display_count == sde_kms->splash_data.num_splash_displays)
+		return -EINVAL;
+
+	/* Trigger NULL flush if built-in secondary/primary is stuck in splash
+	 * while the  primary/secondary is running respectively before lastclose.
+	 */
+	for (i = 0; i < MAX_DSI_DISPLAYS; i++) {
+		splash_display = &sde_kms->splash_data.splash_display[i];
+
+		if (splash_display->cont_splash_enabled && splash_display->encoder) {
+			crtc = splash_display->encoder->crtc;
+			SDE_DEBUG("triggering null commit on enc:%d\n",
+					DRMID(splash_display->encoder));
+			SDE_EVT32(DRMID(splash_display->encoder), SDE_EVTLOG_FUNC_ENTRY);
+			rc = _sde_kms_null_commit(sde_kms->dev, splash_display->encoder);
+
+			if (!rc && crtc)
+				sde_kms_cancel_delayed_work(crtc);
+			if (rc)
+				DRM_ERROR("null flush commit failure during lastclose\n");
+		}
+	}
+
+	return 0;
+}
 
 #ifdef CONFIG_DEEPSLEEP
 static int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms, bool enter)
@@ -3726,6 +3896,7 @@ static int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms, bool enter)
 	if (mem_sleep_current != PM_SUSPEND_MEM)
 		return 0;
 
+	/*Applicable for both deepsleep and hibernation*/
 	SDE_INFO("Deepsleep : enter %d\n", enter);
 
 	for (i = 0; i < sde_kms->dsi_display_count; i++) {
@@ -3734,9 +3905,9 @@ static int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms, bool enter)
 
 
 		if (enter) {
-			/* During deepsleep, clk_parent are reset at HW
-			 * but sw caching is retained in clk framework. To
-			 * maintain same state. unset parents and restore
+			/* During deepsleep/hibernation, clk_parent are reset
+			 * at HW but sw caching is retained in clk framework.
+			 * To maintain same state. unset parents and restore
 			 * during exit.
 			 */
 			if (dsi_display->needs_clk_src_reset)
@@ -3770,7 +3941,7 @@ static inline int _sde_kms_pm_deepsleep_helper(struct sde_kms *sde_kms,
 static void _sde_kms_pm_suspend_idle_helper(struct sde_kms *sde_kms,
 	struct device *dev)
 {
-	int i, ret, crtc_id = 0;
+	int ret, crtc_id = 0;
 	struct drm_device *ddev = dev_get_drvdata(dev);
 	struct drm_connector *conn;
 	struct drm_connector_list_iter conn_iter;
@@ -3807,15 +3978,7 @@ static void _sde_kms_pm_suspend_idle_helper(struct sde_kms *sde_kms,
 	}
 	drm_connector_list_iter_end(&conn_iter);
 
-	for (i = 0; i < priv->num_crtcs; i++) {
-		if (priv->disp_thread[i].thread)
-			kthread_flush_worker(
-				&priv->disp_thread[i].worker);
-		if (priv->event_thread[i].thread)
-			kthread_flush_worker(
-				&priv->event_thread[i].worker);
-	}
-	kthread_flush_worker(&priv->pp_event_worker);
+	msm_atomic_flush_display_threads(priv);
 }
 
 static int sde_kms_pm_suspend(struct device *dev)
@@ -4070,6 +4233,7 @@ static const struct msm_kms_funcs kms_funcs = {
 	.get_address_space_device = _sde_kms_get_address_space_device,
 	.postopen = _sde_kms_post_open,
 	.check_for_splash = sde_kms_check_for_splash,
+	.trigger_null_flush = sde_kms_trigger_null_flush,
 	.get_mixer_count = sde_kms_get_mixer_count,
 	.get_dsc_count = sde_kms_get_dsc_count,
 };

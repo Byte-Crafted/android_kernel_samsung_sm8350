@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023, Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 
@@ -4320,6 +4320,12 @@ struct afe_id_aptx_adaptive_enc_init
 #define AFE_ENCODER_PARAM_ID_PACKETIZER_ID 0x0001322E
 
 /*
+ * MI2S packetizer id for #AVS_MODULE_ID_ENCODER module.
+ * Used when I2S interface is selected.
+ */
+#define AFE_MODULE_ID_PACKETIZER_MI2S 0x1000F101
+
+/*
  * Encoder config block  parameter for the #AVS_MODULE_ID_ENCODER module.
  * This parameter may be set runtime.
  */
@@ -4478,6 +4484,7 @@ struct lc3_channel_mode_param_t {
  * @table{weak__asm__sbc__enc__cfg__t}
  */
 #define ASM_MEDIA_FMT_SBC                         0x00010BF2
+#define ASM_MEDIA_FMT_SBC_SS                      0x00010BF5
 
 /* SBC channel Mono mode.*/
 #define ASM_MEDIA_FMT_SBC_CHANNEL_MODE_MONO                     1
@@ -4556,6 +4563,11 @@ struct asm_sbc_enc_cfg_t {
 	 */
 	uint32_t    sample_rate;
 };
+
+struct asm_ss_sbc_enc_cfg_t {
+	struct asm_sbc_enc_cfg_t custom_config;
+	struct afe_abr_enc_cfg_t abr_config;
+} __packed;
 
 #define ASM_MEDIA_FMT_AAC_AOT_LC            2
 #define ASM_MEDIA_FMT_AAC_AOT_SBR           5
@@ -4868,6 +4880,22 @@ struct asm_ldac_enc_cfg_t {
 	struct afe_abr_enc_cfg_t abr_config;
 } __packed;
 
+/* FMT ID for SSC */
+#define ASM_MEDIA_FMT_SSC 0x00010BF3
+
+struct asm_custom_enc_cfg_ssc_t {
+	uint32_t    sample_rate;
+	/* Mono or stereo */
+	uint16_t    num_channels;
+	uint16_t    reserved;
+	/* num_ch == 1, then PCM_CHANNEL_C,
+	 * num_ch == 2, then {PCM_CHANNEL_L, PCM_CHANNEL_R}
+	 */
+	uint8_t     channel_mapping[8];
+	uint32_t    custom_size;
+	struct afe_abr_enc_cfg_t abr_config;
+} __packed;
+
 struct afe_enc_fmt_id_param_t {
 	/*
 	 * Supported values:
@@ -5057,6 +5085,7 @@ struct asm_aptx_ad_speech_dec_cfg_t {
 
 union afe_enc_config_data {
 	struct asm_sbc_enc_cfg_t sbc_config;
+	struct asm_ss_sbc_enc_cfg_t ss_sbc_config;
 	struct asm_aac_enc_cfg_t aac_config;
 	struct asm_custom_enc_cfg_t  custom_config;
 	struct asm_celt_enc_cfg_t  celt_config;
@@ -5065,6 +5094,7 @@ union afe_enc_config_data {
 	struct asm_aptx_ad_enc_cfg_t  aptx_ad_config;
 	struct asm_aptx_ad_speech_enc_cfg_t aptx_ad_speech_config;
 	struct asm_enc_lc3_cfg_t lc3_enc_config;
+	struct asm_custom_enc_cfg_ssc_t ssc_config;
 };
 
 struct afe_enc_config {
@@ -5072,6 +5102,8 @@ struct afe_enc_config {
 	u32 scrambler_mode;
 	u32 mono_mode;
 	u32 lc3_mono_mode;
+	u16 mtu;
+	u16 a2dp_suspend;
 	union afe_enc_config_data data;
 };
 
@@ -5163,6 +5195,47 @@ struct afe_enc_aptx_ad_speech_cfg_blk_param_t {
 struct afe_dec_media_fmt_t {
 	union afe_dec_config_data dec_media_config;
 } __packed;
+
+#define AVS_PARAM_ID_PEER_MTU_ID 0x0001F101
+#define AVS_PARAM_ID_A2DP_SUSPEND_ID 0x0001F107
+#define AVS_ENCODER_PARAM_ID_ENC_BITRATE 0x0001322D
+#define AVS_PARAM_ID_ENC_FORMAT_ID 0x0001F105
+
+/*
+ * Payload of the AVS_PARAM_ID_DYNAMIC_BITPOOL_ID parameter.
+ */
+struct avs_enc_mtu_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t mtu;
+};
+
+/*
+ * Payload of the AVS_PARAM_ID_A2DP_SUSPEND_ID parameter.
+ */
+struct avs_enc_a2dp_suspend_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t a2dp_suspend;
+};
+
+/*
+ * Payload of the AVS_PARAM_ID_ENC_FORMAT_ID parameter.
+ */
+struct avs_enc_format_param_t {
+	/*
+	 * Supported values:
+	 * #AVS_MODULE_ID_PACKETIZER_COP
+	 * Any OpenDSP supported values
+	 */
+	uint32_t enc_format;
+};
 
 /*
  * Payload of the AVS_ENCODER_PARAM_ID_PACKETIZER_ID parameter.
@@ -6551,6 +6624,30 @@ struct asm_enc_cfg_blk_param_v2 {
 
 } __packed;
 
+#define AVS_MEDIA_ID_SBM_ID 0x00010C19
+struct asm_sbm_param_t {
+    uint32_t      target_delay;
+    uint32_t      prev_delay;
+    uint32_t      current_buffer_level;
+    uint32_t      stop_flag;
+} __packed;
+
+struct asm_bitrate_param_t {
+	u32                  enc_bitrate;
+} __packed;
+
+struct asm_mtu_param_t {
+	u32                  mtu;
+} __packed;
+
+struct asm_a2dp_suspend_param_t {
+	u32                  a2dp_suspend;
+} __packed;
+
+struct asm_enc_format_param_t {
+	u32                  enc_format;
+} __packed;
+
 struct asm_custom_enc_cfg_t_v2 {
 	struct apr_hdr hdr;
 	struct asm_stream_cmd_set_encdec_param encdec;
@@ -6953,6 +7050,13 @@ struct asm_aac_enc_cfg_v2 {
  * The sampling rate must not change during encoding.
  */
 
+} __packed;
+
+struct asm_dyn_bitpool_cfg_v2 {
+	struct apr_hdr hdr;
+	struct afe_port_cmd_set_param_v2 param;
+	struct param_hdr_v1 pdata;
+	struct asm_bitrate_param_t dyn_bitpool;
 } __packed;
 
 #define ASM_MEDIA_FMT_G711_ALAW_FS 0x00010BF7
@@ -12549,6 +12653,17 @@ struct afe_param_id_clock_set_v2_t {
 	uint32_t	d;
 };
 
+#define AFE_PARAM_ID_CLOCK_MUX_CFG		0x000102fd
+struct afe_param_id_clock_mux_cfg_t {
+	char mux_string[128];
+	/* Name of the Mux string.
+	 * String name may varies for each target, so HLOS must pass the proper string based on IPCAT.
+	 * @values Valid string with a maximum of 128 characters
+	 */
+	uint32_t mux_value;
+	/* Value of the external m-clock. */
+};
+
 struct afe_clk_cfg {
 /* Minor version used for tracking the version of the I2S
  * configuration interface.
@@ -13519,10 +13634,29 @@ struct adm_set_compressed_device_latency {
 #define VOICEPROC_MODULE_ID_FLUENCE_PRO_VC_TX               0x00010F35
 #define VOICEPROC_PARAM_ID_FLUENCE_SOUNDFOCUS               0x00010E37
 #define VOICEPROC_PARAM_ID_FLUENCE_SOURCETRACKING           0x00010E38
+#define AUDPROC_PARAM_ID_FLUENCE_NN_SOURCE_TRACKING         0x00010B83
+#define MODULE_ID_FLUENCE_NN                                0x00010B0F
 #define MAX_SECTORS                                         8
 #define MAX_NOISE_SOURCE_INDICATORS                         3
 #define MAX_POLAR_ACTIVITY_INDICATORS                       360
 #define MAX_DOA_TRACKING_ANGLES                             2
+#define MAX_TOP_SPEAKERS                                    5
+#define MAX_FOCUS_DIRECTION                                 2
+
+struct fluence_nn_sound_focus_param {
+	int16_t mode;
+	int16_t focus_direction[MAX_FOCUS_DIRECTION];
+	int16_t focus_width;
+} __packed;
+
+struct fluence_nn_source_tracking_param {
+	int32_t speech_probablity_q20;
+	int16_t speakers[MAX_TOP_SPEAKERS];
+	int16_t reserved;
+	uint8_t polarActivity[MAX_POLAR_ACTIVITY_INDICATORS];
+	uint32_t session_time_lsw;
+	uint32_t session_time_msw;
+} __packed;
 
 struct sound_focus_param {
 	uint16_t start_angle[MAX_SECTORS];
@@ -13541,6 +13675,21 @@ struct doa_tracking_mon_param {
 	uint16_t target_angle_L16[MAX_DOA_TRACKING_ANGLES];
 	uint16_t interf_angle_L16[MAX_DOA_TRACKING_ANGLES];
 	uint8_t polar_activity[MAX_POLAR_ACTIVITY_INDICATORS];
+} __packed;
+
+struct adm_param_fluence_nn_sound_focus_t {
+	int16_t mode;
+	int16_t focus_direction[2];
+	int16_t focus_width;
+} __packed;
+
+struct adm_param_fluence_nn_source_tracking_t {
+	int32_t speech_probablity_q20;
+	int16_t speakers[5];
+	int16_t reserved;
+	uint8_t polarActivity[360];
+	uint32_t session_time_lsw;
+	uint32_t session_time_msw;
 } __packed;
 
 struct adm_param_fluence_soundfocus_t {
