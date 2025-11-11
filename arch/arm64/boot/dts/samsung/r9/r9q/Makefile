@@ -1,9 +1,26 @@
+ifeq ($(filter y,$(CONFIG_MACH_R9Q_EUR_OPENX2)),y)
 dtbo-y += r9q_eur_openx2_w00_r14.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 r9q_eur_openx2_w00_r14.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 dtbo-y += r9q_eur_openx2_w00_r12.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 r9q_eur_openx2_w00_r12.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 dtbo-y += r9q_eur_openx2_w00_r11.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
 r9q_eur_openx2_w00_r11.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+else ifeq ($(filter y,$(CONFIG_MACH_R9Q_EUR_OPENX)),y)
+dtbo-y += r9q_eur_openx_w00_r08.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r08.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r07.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r07.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r06.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r06.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r05.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r05.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r04.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r04.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r02.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r02.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+dtbo-y += r9q_eur_openx_w00_r01.dtbo # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+r9q_eur_openx_w00_r01.dtbo-base := ../../../vendor/qcom/lahaina.dtb ../../../vendor/qcom/lahaina-v2.dtb ../../../vendor/qcom/lahaina-v2.1.dtb # ADDED BY LEGO AUTOMATICALLY: DO NOT SUBMIT
+endif
 # SPDX-License-Identifier: GPL-2.0
 
 define __sec_dtbo_build
