@@ -154,3 +154,6 @@ arch/arm/boot/dts/vendor
 
 # Python cache
 scripts/crypto/__pycache__/
+
+# Out
+out/
