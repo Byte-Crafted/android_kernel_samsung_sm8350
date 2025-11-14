@@ -133,8 +133,13 @@ $(obj)/config_data.gz: $(obj)/config_data FORCE
 
 filechk_cat = cat $<
 
-$(obj)/config_data: $(KCONFIG_CONFIG) FORCE
+ifeq ($(filter y,$(CONFIG_MACH_R9Q_EUR_OPENX2)),y)
+$(obj)/config_data: arch/arm64/configs/stock/r9q_eur_openx2_defconfig FORCE
 	$(call filechk,cat)
+else ifeq ($(filter y,$(CONFIG_MACH_R9Q_EUR_OPENX)),y)
+$(obj)/config_data: arch/arm64/configs/stock/r9q_eur_openx_defconfig FORCE
+	$(call filechk,cat)
+endif
 
 $(obj)/kheaders.o: $(obj)/kheaders_data.tar.xz
 
