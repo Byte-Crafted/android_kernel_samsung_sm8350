@@ -328,6 +328,7 @@ int qcedev_check_and_map_buffer(void *handle,
 		*vaddr = binfo->ion_buf.iova;
 		mapped_size = binfo->ion_buf.mapped_buf_size;
 		atomic_inc(&binfo->ref_count);
+
 	}
 
 	/* Make sure the offset is within the mapped range */
