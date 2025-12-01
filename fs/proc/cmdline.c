@@ -97,6 +97,7 @@ static int __init proc_cmdline_init(void)
 	process_flag(FLAG_REPLACE, "androidboot.warranty_bit=", "0");
 	process_flag(FLAG_REPLACE, "androidboot.fmp_config=", "1");
 	process_flag(FLAG_REPLACE, "androidboot.vbmeta.device_state=", "locked");
+	process_flag(FLAG_REPLACE, "androidboot.veritymode=", "enforcing");
 #endif
 
 	proc_create_single("cmdline", 0, NULL, cmdline_proc_show);
