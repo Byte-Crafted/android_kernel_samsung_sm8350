@@ -442,6 +442,10 @@ static int throne_tracker_thread(void *data)
 	bool prune_only = (bool)data;
 
 	pr_info("throne_tracker: pid: %d started\n", current->pid);
+
+	// this is normally not needed, but it wont hurt
+	kthread_escape();
+
 	throne_tracker_fn(prune_only);
 	throne_thread = NULL;
 	smp_mb();

@@ -72,20 +72,20 @@ int __init kernelsu_init(void)
 
 	ksu_supercalls_init();
 
+	ksu_sucompat_init(); // so the feature is registered
+
 	ksu_core_init();
 
 	ksu_allowlist_init();
 
 	ksu_throne_tracker_init();
 
-	ksu_sucompat_init(); // so the feature is registered
+#ifdef CONFIG_KSU_KPROBES_KSUD
+	kp_ksud_init();
+#endif
 
 #ifdef CONFIG_KSU_EXTRAS
 	ksu_avc_spoof_init(); // so the feature is registered
-#endif
-
-#ifdef CONFIG_KSU_KPROBES_KSUD
-	kp_ksud_init();
 #endif
 
 	return 0;

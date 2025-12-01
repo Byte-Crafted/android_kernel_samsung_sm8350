@@ -146,10 +146,7 @@ LSM_HANDLER_TYPE ksu_handle_rename(struct dentry *old_dentry, struct dentry *new
 	return 0;
 }
 
-// ksu_handle_prctl removed - now using ioctl via reboot hook
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0) || defined(KSU_HAS_PATH_UMOUNT)
-extern int path_umount(struct path *path, int flags);
 static void ksu_path_umount(const char *mnt, struct path *path, int flags)
 {
 	int err = path_umount(path, flags);
@@ -201,11 +198,14 @@ static void try_umount(const char *mnt, int flags)
 #endif
 }
 
+static inline void ksu_force_sig(int sig)
+{
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0) 
-#define KSU_FORCE_KILL force_sig(SIGKILL) 
+	force_sig(sig);
 #else
-#define KSU_FORCE_KILL force_sig(SIGKILL, current)
+	force_sig(sig, current);
 #endif
+}
 
 LSM_HANDLER_TYPE ksu_handle_setuid(struct cred *new, const struct cred *old)
 {
@@ -222,18 +222,18 @@ LSM_HANDLER_TYPE ksu_handle_setuid(struct cred *new, const struct cred *old)
 		// disallow any non-ksu domain escalation from non-root to root!
 		if (unlikely(new_euid.val) == 0 && !is_ksu_domain()) {
 			pr_warn("find suspicious EoP: %d %s, from %d to %d\n", current->pid, current->comm, old_uid.val, new_uid.val);
-			KSU_FORCE_KILL;
+			ksu_force_sig(SIGKILL);
 			return 0;
 		}
 		// disallow appuid decrease to any other uid if it is not allowed to su
 		if (is_appuid(old_uid.val)) {
 			if (new_euid.val < old_euid.val && !ksu_is_allow_uid_for_current(old_uid.val)) {
 				pr_warn("find suspicious EoP: %d %s, from %d to %d\n", current->pid, current->comm, old_euid.val, new_euid.val);
-				KSU_FORCE_KILL;
+				ksu_force_sig(SIGKILL);
 				return 0;
 			}
 		}
-		
+
 		return 0;
 	}
 	
@@ -260,7 +260,7 @@ LSM_HANDLER_TYPE ksu_handle_setuid(struct cred *new, const struct cred *old)
 		return 0;
 	}
 
-	// this hook is used for umounting overlayfs for some uid, if there isn't any module mounted, just ignore it!
+	// if there isn't any module mounted, just ignore it!
 	if (!ksu_module_mounted) {
 		return 0;
 	}
@@ -269,40 +269,33 @@ LSM_HANDLER_TYPE ksu_handle_setuid(struct cred *new, const struct cred *old)
 		return 0;
 	}
 
-	if (is_non_appuid(new_uid.val)) {
-		// pr_info("handle setuid ignore non application uid: %d\n", new_uid.val);
+	// There are 5 scenarios:
+	// 1. Normal app: zygote -> appuid
+	// 2. Isolated process forked from zygote: zygote -> isolated_process
+	// 3. App zygote forked from zygote: zygote -> appuid
+	// 4. Isolated process froked from app zygote: appuid -> isolated_process (already handled by 3)
+	// 5. Isolated process froked from webview zygote (no need to handle, app cannot run custom code)
+	if (!is_appuid(new_uid.val) && !is_isolated_process(new_uid.val)) {
 		return 0;
 	}
 
-	// isolated process may be directly forked from zygote, always unmount
-	if (is_unsupported_app_uid(new_uid.val)) {
-		// pr_info("handle umount for unsupported application uid: %d\n", new_uid.val);
-		goto do_umount;
-	}
-
-	if (ksu_is_allow_uid(new_uid.val)) {
-		// pr_info("handle setuid ignore allowed application: %d\n", new_uid.val);
+	if (!ksu_uid_should_umount(new_uid.val) && !is_isolated_process(new_uid.val)) {
 		return 0;
 	}
 
-	if (!ksu_uid_should_umount(new_uid.val)) {
-		return 0;
-	}
-
-do_umount:
 	// check old process's selinux context, if it is not zygote, ignore it!
 	// because some su apps may setuid to untrusted_app but they are in global mount namespace
 	// when we umount for such process, that is a disaster!
-	if (!is_zygote(old)) {
+	// also handle case 4 and 5
+	bool is_zygote_child = is_zygote(old);
+	if (!is_zygote_child) {
 		pr_info("handle umount ignore non zygote child: %d\n",
 			current->pid);
 		return 0;
 	}
-#ifdef CONFIG_KSU_DEBUG
+
 	// umount the target mnt
-	pr_info("handle umount for uid: %d, pid: %d\n", new_uid.val,
-		current->pid);
-#endif
+	pr_info("handle umount for uid: %d, pid: %d\n", new_uid.val, current->pid);
 
 	struct mount_entry *entry;
 	down_read(&mount_list_lock);
@@ -315,7 +308,7 @@ do_umount:
 	return 0;
 }
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_KSU_ALLOWLIST_WORKAROUND)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
 extern void ksu_grab_init_session_keyring(const char *filename);
 #endif
 
@@ -324,7 +317,7 @@ LSM_HANDLER_TYPE ksu_bprm_check(struct linux_binprm *bprm)
 	if (likely(!ksu_execveat_hook))
 		return 0;
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_KSU_ALLOWLIST_WORKAROUND)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
 	ksu_grab_init_session_keyring((const char *)bprm->filename);
 #endif
 
@@ -335,6 +328,7 @@ LSM_HANDLER_TYPE ksu_bprm_check(struct linux_binprm *bprm)
 
 // dummy
 #ifndef CONFIG_KSU_LSM_SECURITY_HOOKS
+#include <linux/key.h>
 int ksu_key_permission(key_ref_t key_ref, const struct cred *cred,
 			      unsigned perm)
 {

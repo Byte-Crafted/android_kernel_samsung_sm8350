@@ -12,10 +12,11 @@
 #include <linux/seccomp.h>
 #include "klog.h" // IWYU pragma: keep
 
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_KSU_ALLOWLIST_WORKAROUND)
-#include "linux/key.h"
-#include "linux/errno.h"
-#include "linux/cred.h"
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
+#include <linux/key.h>
+#include <linux/errno.h>
+#include <linux/cred.h>
 struct key *init_session_keyring = NULL;
 
 static inline int install_session_keyring(struct key *keyring)
@@ -72,7 +73,7 @@ void ksu_grab_init_session_keyring(const char *filename)
 
 struct file *ksu_filp_open_compat(const char *filename, int flags, umode_t mode)
 {
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 10, 0) || defined(CONFIG_KSU_ALLOWLIST_WORKAROUND)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 2, 0)
 	// normally we only put this on ((current->flags & PF_WQ_WORKER) || (current->flags & PF_KTHREAD))
 	// but in the grand scale of things, this does NOT matter.
 	if (init_session_keyring != NULL && !current_cred()->session_keyring) {
