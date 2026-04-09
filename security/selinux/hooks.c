@@ -2977,7 +2977,7 @@ static int selinux_inode_init_security_anon(struct inode *inode,
 	struct inode_security_struct *isec;
 	int rc;
 
-	if (unlikely(!selinux_initialized(&selinux_state)))
+	if (unlikely(!selinux_state.initialized))
 		return 0;
 
 	isec = selinux_inode(inode);
@@ -3496,7 +3496,7 @@ static int selinux_inode_listsecurity(struct inode *inode, char *buffer, size_t 
 {
 	const int len = sizeof(XATTR_NAME_SELINUX);
 
-	if (!selinux_initialized(&selinux_state))
+	if (!selinux_state.initialized)
 		return 0;
 
 	if (buffer && len <= buffer_size)
