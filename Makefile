@@ -503,7 +503,7 @@ KBUILD_CFLAGS   := -Wall -Wundef -Werror=strict-prototypes -Wno-trigraphs \
 		   -std=gnu89
 KBUILD_CPPFLAGS := -D__KERNEL__
 KBUILD_AFLAGS_KERNEL :=
-KBUILD_CFLAGS_KERNEL := 
+KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
 KBUILD_LDFLAGS_MODULE :=
@@ -1039,10 +1039,6 @@ KBUILD_CFLAGS += -fno-builtin-wcslen
 
 # change __FILE__ to the relative path from the srctree
 KBUILD_CFLAGS	+= $(call cc-option,-fmacro-prefix-map=$(srctree)/=)
-
-KBUILD_CFLAGS   += -Wno-implicit-enum-conversion
-KBUILD_CFLAGS   += $(call cc-option,-Wno-implicit-enum-conversion)
-KBUILD_CFLAGS   += $(call cc-option,-Wno-implicit-enum-enum-cast)
 
 include scripts/Makefile.kasan
 include scripts/Makefile.extrawarn
