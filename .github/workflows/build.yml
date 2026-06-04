@@ -27,7 +27,7 @@ jobs:
           ./build.sh
 
       - name: Upload Flashable Kernel ZIP
-        uses: actions/artifacts-upload@v4
+        uses: actions/upload-artifact@v4
         with:
           name: S21FE-EurekaKernel-Artifacts
           path: ~/toolchains/EurekaOut/S21FE/*.zip
