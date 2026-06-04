@@ -19,7 +19,7 @@ jobs:
       - name: Install Build Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git curl wget unzip tar lz4 awk sed zip patch build-essential bc libssl-dev bison flex
+          sudo apt-get install -y git curl wget unzip tar lz4 gawk sed zip patch build-essential bc libssl-dev bison flex
 
       - name: Run Build Script
         run: |
