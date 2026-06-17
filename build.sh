@@ -176,7 +176,7 @@ build_kernel() {
     [[ -d "$OUT_DIR" ]] && make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" clean 2>&1 | sed 's/^/       /'
 
     log_step "make defconfig..."
-    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" eureka/r9q_eur_openx2_defconfig 2>&1 | sed 's/^/       /'
+    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" DEFCONFIG="$SRC_DIR/arch/arm64/configs/eureka/r9q_eur_openx2_defconfig" defconfig 2>&1 | sed 's/^/       /'
     
     log_step "make kernel..."
     make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" 2>&1 | sed 's/^/       /'
