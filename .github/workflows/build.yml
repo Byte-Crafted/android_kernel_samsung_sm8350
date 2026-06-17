@@ -21,6 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git curl wget unzip tar lz4 gawk sed zip patch build-essential bc libssl-dev bison flex
 
+      - name: Patch VDSO Makefile for Clang integrated assembler
+        run: |
+          sed -i '/^KBUILD_AFLAGS/s/$/ -fintegrated-as/' \
+            arch/arm64/kernel/vdso/Makefile
+          sed -i '/^KBUILD_CFLAGS/s/$/ -fintegrated-as/' \
+            arch/arm64/kernel/vdso/Makefile
+
       - name: Run Build Script
         run: |
           chmod +x build.sh
