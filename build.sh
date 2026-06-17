@@ -152,6 +152,8 @@ fetch_tools() {
 build_kernel() {
     log_group_start "🔨" "Kernel Compile  [$(ts)]"
     export ARCH=arm64
+    export CLANG_TRIPLE=aarch64-linux-gnu-
+    export CROSS_COMPILE=aarch64-linux-gnu-
 
     # Setup standard QCOM flags matching your target architecture 
     export LLVM=1 DEPMOD=depmod
@@ -174,7 +176,7 @@ build_kernel() {
     [[ -d "$OUT_DIR" ]] && make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" clean 2>&1 | sed 's/^/       /'
 
     log_step "make defconfig..."
-    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" gki_defconfig eureka/r9q_eur_openx2_defconfig 2>&1 | sed 's/^/       /'
+    make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" eureka/r9q_eur_openx2_defconfig 2>&1 | sed 's/^/       /'
     
     log_step "make kernel..."
     make -j"$JOBS" -C "$SRC_DIR" O="$OUT_DIR" 2>&1 | sed 's/^/       /'
