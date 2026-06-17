@@ -22,8 +22,11 @@ ldflags-y := -shared -nostdlib -soname=linux-vdso.so.1 --hash-style=sysv \
 
 ccflags-y := -fno-common -fno-builtin -fno-stack-protector -ffixed-x18
 ccflags-y += -DDISABLE_BRANCH_PROFILING
+ccflags-y += -fintegrated-as
+
 
 VDSO_LDFLAGS := -Bsymbolic
+VDSO_LDFLAGS += -fintegrated-as
 
 CFLAGS_REMOVE_vgettimeofday.o = $(CC_FLAGS_FTRACE) -Os $(CC_FLAGS_SCS) \
 				$(CC_FLAGS_LTO)
