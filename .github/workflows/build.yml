@@ -1,0 +1,35 @@
+name: S21 FE Kernel Build
+
+on:
+  workflow_dispatch: 
+  push:
+    branches:
+      - ksun-qpr2
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Kernel Source
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive' 
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git curl wget unzip tar lz4 gawk sed zip patch build-essential bc libssl-dev bison flex
+
+      - name: Run Build Script
+        run: |
+          chmod +x build.sh
+          ./build.sh
+
+      - name: Upload Flashable Kernel ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: S21FE-EurekaKernel-Artifacts
+          path: ~/toolchains/EurekaOut/S21FE/*.zip
+          if-no-files-found: error
+        
