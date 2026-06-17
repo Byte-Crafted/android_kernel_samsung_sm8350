@@ -157,7 +157,7 @@ build_kernel() {
 
     # Setup standard QCOM flags matching your target architecture 
     export LLVM=1 DEPMOD=depmod
-    export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
+    export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__ -fintegrated-as"
     
     COMREV=$(git rev-parse --short HEAD)
     export LOCALVERSION="-EurekaKernel-${COMREV}-${VARIANT}"
