@@ -99,7 +99,7 @@ fetch_tools() {
         log_step "Downloading Google AOSP Clang ($CLANGVER)..."
         mkdir -p "$TC_DIR/$CLANGVER"
         # Using curl for the GoogleSource web archive download stream
-        curl -L "${NK_CLANG_URL}" -o "$TC_DIR/$CLANGVER.tar.gz"
+        curl -Lb "gi=0" "${NK_CLANG_URL}" -o "$TC_DIR/$CLANGVER.tar.gz"
         tar -xf "$TC_DIR/$CLANGVER.tar.gz" -C "$TC_DIR/$CLANGVER"
         rm -f "$TC_DIR/$CLANGVER.tar.gz"
         log_ok "Clang 19 ready"
