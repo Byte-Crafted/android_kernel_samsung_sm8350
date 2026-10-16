@@ -1,0 +1,112 @@
+name: Build S21 FE Kernel
+
+on:
+  push:
+    branches:
+      - "qpr2"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and upload boot images
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            flex \
+            libelf-dev \
+            libssl-dev \
+            jq \
+            lz4 \
+            patch \
+            unzip \
+            zip
+
+      - name: Make build script executable
+        run: chmod +x ./build.sh
+
+      - name: Run build.sh
+        shell: bash
+        run: ./build.sh
+
+      - name: Verify output images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOOT_IMG="$HOME/toolchains/EurekaOut/S21FE/boot.img"
+          VENDOR_BOOT_IMG="$HOME/toolchains/EurekaOut/S21FE/vendor_boot.img"
+
+          test -s "$BOOT_IMG"
+          test -s "$VENDOR_BOOT_IMG"
+
+          echo "boot.img:"
+          ls -lh "$BOOT_IMG"
+          sha256sum "$BOOT_IMG"
+
+          echo "vendor_boot.img:"
+          ls -lh "$VENDOR_BOOT_IMG"
+          sha256sum "$VENDOR_BOOT_IMG"
+
+      - name: Upload images to GoFile
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          BOOT_IMG="$HOME/toolchains/EurekaOut/S21FE/boot.img"
+          VENDOR_BOOT_IMG="$HOME/toolchains/EurekaOut/S21FE/vendor_boot.img"
+
+          upload_gofile() {
+            local file="$1"
+            local name="$2"
+            local response
+            local url
+
+            echo "::group::Uploading ${name}"
+
+            response="$(curl --fail-with-body --silent --show-error \
+              --retry 5 \
+              --retry-delay 5 \
+              --retry-connrefused \
+              -F "file=@${file}" \
+              "https://upload.gofile.io/uploadfile")"
+
+            echo "$response" | jq .
+
+            url="$(printf '%s' "$response" | jq -r '.data.downloadPage // empty')"
+
+            if [[ -z "$url" ]]; then
+              echo "::error::GoFile did not return a downloadPage for ${name}"
+              return 1
+            fi
+
+            echo "${name}: ${url}"
+            echo "::endgroup::"
+
+            {
+              echo "## GoFile uploads"
+              echo
+              echo "- **${name}:** ${url}"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          upload_gofile "$BOOT_IMG" "boot.img"
+          upload_gofile "$VENDOR_BOOT_IMG" "vendor_boot.img"
