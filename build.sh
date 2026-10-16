@@ -21,9 +21,9 @@ NK_DEFCONFIG="eureka/r9q_eur_openx2_defconfig"
 # Downloads the zip and extracts boot.img and vendor_boot.img from eureka/
 NK_RELEASE_ZIP_URL="https://github.com/saadelasfur/eureka_releases/releases/download/20251229/Eureka_RKSU-v3.0.0_20251229_r9q2.zip"
 
-# ── Clang Toolchain (Clang 19.0.0 - r530567) ─────────────────────
-NK_CLANG_VERSION="clang-r530567"
-NK_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r530567.tar.gz"
+# ── Clang Toolchain (Clang 23.0.1 - r614150) ───────────────────
+NK_CLANG_VERSION="clang-r614150"
+NK_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r614150.tar.gz"
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ fetch_tools() {
     log_group_start "🧰" "Toolchain & Assets"
     mkdir -p "$TC_DIR"
 
-    # Fetch Clang 19 (r530567) from AOSP upstream
+    # Fetch Clang 23.0.1 (r614150) from AOSP upstream
     if [[ ! -d "$CLANG_PREBUILT_BIN" ]]; then
         log_step "Downloading Google AOSP Clang ($CLANGVER)..."
         mkdir -p "$TC_DIR/$CLANGVER"
@@ -102,9 +102,9 @@ fetch_tools() {
         curl -Lb "gi=0" "${NK_CLANG_URL}" -o "$TC_DIR/$CLANGVER.tar.gz"
         tar -xf "$TC_DIR/$CLANGVER.tar.gz" -C "$TC_DIR/$CLANGVER"
         rm -f "$TC_DIR/$CLANGVER.tar.gz"
-        log_ok "Clang 19 ready"
+        log_ok "Clang 23.0.1 ready"
     else
-        log_ok "Clang 19 — cached ✓"
+        log_ok "Clang 23.0.1 — cached ✓"
     fi
 
     # Fetch magiskboot
@@ -154,7 +154,7 @@ build_kernel() {
     export ARCH=arm64
 
     # Setup standard QCOM flags matching your target architecture 
-    export LLVM=1 DEPMOD=depmod
+    export LLVM=1 LLVM_IAS=1 DEPMOD=depmod
     export KCFLAGS="${KCFLAGS} -D__ANDROID_COMMON_KERNEL__"
     
     COMREV=$(git rev-parse --short HEAD)
