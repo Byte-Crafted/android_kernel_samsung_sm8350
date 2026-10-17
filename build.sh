@@ -23,7 +23,7 @@ NK_RELEASE_ZIP_URL="https://github.com/saadelasfur/eureka_releases/releases/down
 
 # ── Clang Toolchain (Clang 23.0.1 - r614150) ───────────────────
 NK_CLANG_VERSION="clang-r614150"
-NK_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r614150.tar.gz"
+NK_CLANG_URL="https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/mirror-goog-main-llvm-toolchain-source/clang-r614150.tar.gz"
 
 
 # ─────────────────────────────────────────────────────────────────
